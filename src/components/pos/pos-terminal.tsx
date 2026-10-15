@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { clsx } from "clsx";
 import {
@@ -100,13 +100,12 @@ export function PosTerminal(props: {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [serialFor, setSerialFor] = useState<CatalogItem | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [canScan, setCanScan] = useState(false);
+  const canScan = useSyncExternalStore(noopSubscribe, cameraScanSupported, () => false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Keep a copy of the catalogue on the device for offline selling, and refresh stock now and then.
   useEffect(() => {
     cacheCatalog(business.id, props.catalog);
-    setCanScan(cameraScanSupported());
     const timer = window.setInterval(async () => {
       if (!navigator.onLine) return;
       try {
@@ -515,7 +514,7 @@ export function PosTerminal(props: {
       </div>
       <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
         <div className="flex flex-col gap-2 text-sm">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
             <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={clsx(selectClass, "!py-2")} aria-label={terms.customer}>
               <option value="">Walk-in {terms.customer.toLowerCase()}</option>
               {customers.map((c) => (
@@ -733,7 +732,7 @@ export function PosTerminal(props: {
                 {payments.map((p) => (
                   <li key={p.id} className="rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
                     <div className="flex items-center gap-2">
-                      <select value={p.method} onChange={(e) => setPay(p.id, { method: e.target.value as PaymentMethod, currency: "SLE" })} className={clsx(selectClass, "!w-auto flex-1 !py-2")}>
+                      <select value={p.method} onChange={(e) => setPay(p.id, { method: e.target.value as PaymentMethod, currency: "SLE" })} className={clsx(selectClass, "!w-auto min-w-0 flex-1 !py-2")}>
                         {methods.map((m) => (
                           <option key={m} value={m}>
                             {PAYMENT_LABELS[m]}
@@ -741,7 +740,7 @@ export function PosTerminal(props: {
                         ))}
                       </select>
                       {(p.method === "cash" || p.method === "bank") && (
-                        <select value={p.currency} onChange={(e) => setPay(p.id, { currency: e.target.value as Currency })} className={clsx(selectClass, "!w-20 !py-2")} aria-label="Currency">
+                        <select value={p.currency} onChange={(e) => setPay(p.id, { currency: e.target.value as Currency })} className={clsx(selectClass, "!w-16 shrink-0 !py-2")} aria-label="Currency">
                           <option value="SLE">Le</option>
                           <option value="USD">$</option>
                         </select>
@@ -750,7 +749,7 @@ export function PosTerminal(props: {
                         value={p.amount}
                         onChange={(e) => setPay(p.id, { amount: e.target.value })}
                         inputMode="decimal"
-                        className={clsx(inputClass, "!w-28 !py-2 text-right tabular-nums")}
+                        className={clsx(inputClass, "!w-24 shrink-0 !py-2 text-right tabular-nums")}
                         aria-label="Amount"
                       />
                       {payments.length > 1 && (
@@ -841,6 +840,8 @@ export function PosTerminal(props: {
     </div>
   );
 }
+
+const noopSubscribe = () => () => {};
 
 function CatChip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (

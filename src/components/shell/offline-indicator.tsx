@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { CloudUpload, WifiOff } from "lucide-react";
 import { pendingSalesCount, subscribeQueue } from "@/lib/offline/queue";
 
@@ -16,12 +16,7 @@ function subscribeOnline(cb: () => void) {
 /** Shows when the device is offline and how many sales are waiting to sync. */
 export function OfflineIndicator() {
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
-  const [pending, setPending] = useState(0);
-
-  useEffect(() => {
-    setPending(pendingSalesCount());
-    return subscribeQueue(() => setPending(pendingSalesCount()));
-  }, []);
+  const pending = useSyncExternalStore(subscribeQueue, pendingSalesCount, () => 0);
 
   if (online && pending === 0) return null;
   return (

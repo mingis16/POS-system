@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BUSINESS_COOKIE } from "@/lib/constants";
@@ -13,6 +14,8 @@ export const isConfigured = () =>
 
 /** The signed-in user, memoised per request. */
 export const getUser = cache(async () => {
+  // Always per request: the answer depends on the session and on runtime env vars.
+  await connection();
   if (!isConfigured()) return null;
   const supabase = await createClient();
   const {

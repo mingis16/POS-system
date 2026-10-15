@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireMember } from "@/lib/auth";
-import { formatDate, formatDateTime, formatMoney, formatQty, titleCase } from "@/lib/format";
+import { daysUntil, formatDate, formatDateTime, formatMoney, formatQty, titleCase } from "@/lib/format";
 import { Card, PageHeader, TableWrap } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
@@ -252,7 +252,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                 </thead>
                 <tbody>
                   {(batches.data ?? []).map((b) => {
-                    const days = b.expiry_date ? Math.round((Date.parse(b.expiry_date) - Date.now()) / 86_400_000) : null;
+                    const days = b.expiry_date ? daysUntil(b.expiry_date) : null;
                     return (
                       <tr key={b.id}>
                         <td className={tdClass}>{b.batch_no ?? "—"}</td>

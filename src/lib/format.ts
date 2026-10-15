@@ -58,6 +58,11 @@ export function formatTime(value: string | Date | null | undefined): string {
   return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TIME_ZONE });
 }
 
+/** Whole days from today until an ISO date (negative when past). */
+export function daysUntil(iso: string): number {
+  return Math.round((Date.parse(iso.slice(0, 10) + "T00:00:00Z") - Date.parse(todayISO() + "T00:00:00Z")) / 86_400_000);
+}
+
 export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }

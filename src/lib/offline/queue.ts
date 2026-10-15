@@ -44,6 +44,16 @@ export function queuedSales(): QueuedSale[] {
   return typeof window === "undefined" ? [] : read();
 }
 
+/** The raw queue string: a stable snapshot for useSyncExternalStore. */
+export function queueSnapshot(): string {
+  if (typeof window === "undefined") return "[]";
+  try {
+    return localStorage.getItem(QUEUE_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
 export function pendingSalesCount(): number {
   return typeof window === "undefined" ? 0 : read().length;
 }

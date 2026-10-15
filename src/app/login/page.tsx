@@ -4,11 +4,13 @@ import { Field } from "@/components/ui/field";
 import { inputClass } from "@/components/ui/styles";
 import { AuthCard, NotConfigured } from "@/components/shell/auth-card";
 import { signIn } from "@/app/auth/actions";
+import { connection } from "next/server";
 import { isConfigured } from "@/lib/auth";
 
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+  await connection();
   const { next } = await searchParams;
   return (
     <AuthCard

@@ -12,7 +12,9 @@ export async function updateSession(request: NextRequest) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     // Not configured yet: show the setup notice on the login page.
     if (!PUBLIC_PATHS.some((p) => pathname.startsWith(p)) && pathname !== "/") {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return pathname.startsWith("/api/")
+        ? NextResponse.json({ error: "Supabase is not configured" }, { status: 503 })
+        : NextResponse.redirect(new URL("/login", request.url));
     }
     return response;
   }

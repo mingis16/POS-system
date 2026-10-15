@@ -26,17 +26,16 @@ export function cameraScanSupported(): boolean {
  */
 export function CameraScanner({ onDetect, onClose }: { onDetect: (code: string) => void; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    cameraScanSupported() ? null : "This browser cannot scan with the camera. Use the search box or a barcode scanner.",
+  );
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let raf = 0;
     let stopped = false;
     const Detector = window.BarcodeDetector;
-    if (!Detector) {
-      setError("This browser cannot scan with the camera. Use the search box or a barcode scanner.");
-      return;
-    }
+    if (!Detector) return;
     const detector = new Detector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"] });
 
     (async () => {

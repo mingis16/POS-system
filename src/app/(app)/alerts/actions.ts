@@ -15,7 +15,7 @@ export async function updateAlert(_: ActionState, form: FormData): Promise<Actio
   }, "/alerts");
 }
 
-export async function scanExpiries(_: ActionState): Promise<ActionState> {
+export async function scanExpiries(): Promise<ActionState> {
   return runAction(async () => {
     const { supabase, business } = await authorize(ADMIN_ROLES);
     const { data, error } = await supabase.rpc("scan_expiries", { b: business.id });

@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { CloudOff, RefreshCw, Trash2 } from "lucide-react";
-import { discardQueuedSale, queuedSales, subscribeQueue, syncQueuedSales, type QueuedSale } from "@/lib/offline/queue";
+import { discardQueuedSale, queueSnapshot, subscribeQueue, syncQueuedSales, type QueuedSale } from "@/lib/offline/queue";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { buttonSecondary, buttonSmall } from "@/components/ui/styles";
 
 /** Sales saved on this device while offline, with any the server refused. */
 export function QueuedSalesPanel() {
-  const [list, setList] = useState<QueuedSale[]>([]);
+  const raw = useSyncExternalStore(subscribeQueue, queueSnapshot, () => "[]");
+  const list = useMemo<QueuedSale[]>(() => {
+    try {
+      return JSON.parse(raw) as QueuedSale[];
+    } catch {
+      return [];
+    }
+  }, [raw]);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setList(queuedSales());
-    return subscribeQueue(() => setList(queuedSales()));
-  }, []);
 
   if (!list.length) return null;
   return (

@@ -120,7 +120,8 @@ export function OnboardingWizard({ ownerName, ownerPhone }: { ownerName: string;
   const storage = useWatch({ control, name: "storage_modes" }) ?? [];
   const payments = useWatch({ control, name: "payment_methods" }) ?? [];
   const modules = (useWatch({ control, name: "modules" }) ?? {}) as BusinessModules;
-  const watchedItems = useWatch({ control, name: "items" }) ?? [];
+  const watchedItemsRaw = useWatch({ control, name: "items" });
+  const watchedItems = useMemo(() => watchedItemsRaw ?? [], [watchedItemsRaw]);
   const terms = useWatch({ control, name: "terminology" });
   const archetype = type ? getArchetype(type) : null;
 
@@ -514,7 +515,7 @@ export function OnboardingWizard({ ownerName, ownerPhone }: { ownerName: string;
                                 <option key={u}>{u}</option>
                               ))}
                             </select>
-                            <select {...register(`items.${i}.kind`)} aria-label="Kind" className={clsx(selectClass, "sm:col-span-2")}>
+                            <select {...register(`items.${i}.kind`)} aria-label="Kind" className={clsx(selectClass, "self-end sm:col-span-2")}>
                               <option value="stock">For sale</option>
                               <option value="raw_material">Material / ingredient</option>
                               <option value="service">Service</option>
