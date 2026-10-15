@@ -1,26 +1,100 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Dark mode follows the device setting. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #f6f7f5;
+  --surface: #ffffff;
+  --foreground: #0b0b0b;
+  /* Chart tokens: dataviz reference palette, light steps. */
+  --series-1: #2a78d6;
+  --series-1-wash: rgb(42 120 214 / 0.12);
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #0b0c0b;
+    --surface: #141514;
     --foreground: #ededed;
+    --series-1: #3987e5;
+    --series-1-wash: rgb(57 135 229 / 0.16);
+    --grid: #2c2c2a;
+    --axis: #383835;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-series-1: var(--series-1);
+  --color-series-1-wash: var(--series-1-wash);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  /* Status colours: reserved, the same in both themes, always shown with an icon and a label. */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+  /* Brand: Sierra Leone green and blue. */
+  --color-brand-50: #ecfdf3;
+  --color-brand-100: #d1fadf;
+  --color-brand-500: #12b76a;
+  --color-brand-600: #0e9a5a;
+  --color-brand-700: #0b7a48;
+  --color-brand-800: #095c37;
+  --color-sky-brand: #0072c6;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Number inputs: no spinners — staff type quantities and money. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Room for the phone bottom bar and the home indicator. */
+.pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 4.5rem);
+}
+@media (min-width: 1024px) {
+  .pb-safe {
+    padding-bottom: 2rem;
+  }
+}
+
+/* Printing receipts and reports: only the printable area, on white. */
+@media print {
+  @page {
+    margin: 10mm;
+  }
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+  }
 }

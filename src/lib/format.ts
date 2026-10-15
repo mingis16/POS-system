@@ -102,3 +102,8 @@ export function initials(name: string): string {
     .map((p) => p[0]!.toUpperCase())
     .join("");
 }
+
+/** Strips characters that have meaning in PostgREST filter strings (or/and lists, wildcards). */
+export function safeSearch(q: string | undefined | null): string {
+  return (q ?? "").replace(/[,()%*\\:"']/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+}

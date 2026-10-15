@@ -68,7 +68,7 @@ export const onboardingSchema = z
     email: z.string().trim().email("Enter a valid e-mail.").or(z.literal("")).optional(),
     owner_name: trimmed("Your name", 80),
     // Step 2
-    business_type: z.enum(ARCHETYPE_KEYS),
+    business_type: z.enum(ARCHETYPE_KEYS, { error: "Choose the type of business." }),
     custom_type_label: optionalText(80),
     units: z.array(z.string().trim().min(1)).min(1, "Choose at least one stock unit."),
     terminology: z.object({
