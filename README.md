@@ -73,7 +73,7 @@ src/
 
 1. **Install:** `npm install`
 2. **Supabase project:** create one at supabase.com. In *Authentication → Providers → Email*, decide whether new owners must confirm their e-mail.
-3. **Apply the migrations** in order — either `supabase link --project-ref <ref>` then `supabase db push`, or paste each file from `supabase/migrations` into the SQL editor in filename order.
+3. **Apply the migrations** (once, on the empty project) — either `supabase link --project-ref <ref>` then `supabase db push`, or run `npm run db:bundle` and paste the generated `supabase/setup.sql` into *SQL Editor → New query → Run*.
 4. **Environment:** `cp .env.example .env.local` and fill in `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and (for staff logins without e-mail and for cron) `SUPABASE_SERVICE_ROLE_KEY`. Set `CRON_SECRET` to a long random string.
 5. **Run:** `npm run dev` → http://localhost:3000 → *Set up my business*.
 

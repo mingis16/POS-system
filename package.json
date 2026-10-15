@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test:db": "node supabase/tests/database.test.mjs"
+    "test:db": "node supabase/tests/database.test.mjs",
+    "db:bundle": "node scripts/bundle-migrations.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

@@ -163,6 +163,12 @@ create policy production_runs_read on public.production_runs for select to authe
 -- Table privileges (column-limited writes)
 -- ---------------------------------------------------------------------------
 
+-- The service role (cron jobs, staff-login creation) bypasses RLS but still
+-- needs privileges; newer Supabase projects no longer grant them by default.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+
 revoke all on all tables in schema public from anon;
 revoke insert, update, delete, truncate, references, trigger on all tables in schema public from authenticated;
 grant select on all tables in schema public to authenticated;
@@ -213,6 +219,7 @@ grant update (kind, title, customer_id, customer_name, customer_phone, descripti
 -- ---------------------------------------------------------------------------
 
 revoke execute on all functions in schema public from public, anon, authenticated;
+grant execute on all functions in schema public to service_role;
 
 grant execute on function
   public.role_in(uuid),
