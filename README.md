@@ -90,7 +90,7 @@ npm run build
 
 ### Deploy (Vercel)
 
-Import the repo, add the environment variables, deploy. `vercel.json` schedules the weekly report (Mondays 06:00 GMT) and the alert dispatcher (every 10 minutes); Vercel sends `CRON_SECRET` automatically. Elsewhere, call those two URLs from any scheduler with `Authorization: Bearer $CRON_SECRET`.
+Import the repo, add the environment variables, deploy. `vercel.json` schedules the weekly report (Mondays 06:00 GMT) and the alert dispatcher (daily 07:00 GMT — the Hobby plan only allows daily crons; on Pro, set it to `*/10 * * * *`); Vercel sends `CRON_SECRET` automatically. Elsewhere, call those two URLs from any scheduler with `Authorization: Bearer $CRON_SECRET`.
 
 ### AI advisor (optional)
 
