@@ -5,12 +5,14 @@
 //   npm run test:db
 
 import { PGlite } from "@electric-sql/pglite";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MIGRATIONS = fileURLToPath(new URL("../migrations/", import.meta.url));
-const db = new PGlite();
+// Supabase ships pgcrypto (manager PINs are bcrypt hashes); PGlite loads it as an extension.
+const db = new PGlite({ extensions: { pgcrypto } });
 
 let failures = 0;
 let passes = 0;
@@ -361,6 +363,158 @@ await as(CASHIER, () => rpc("submit_cash_up", { business_id: B, counted_cash: 0 
 const nq = await one(`select count(*)::int c from notifications where business_id = $1 and channel = 'whatsapp' and status = 'pending'`, [B]);
 check("critical alerts queue a WhatsApp message", nq.c >= 1, nq);
 check("anon sees nothing", (await (async () => { await db.exec(`set role anon`); try { return await q(`select * from products`); } catch { return []; } finally { await db.exec(`reset role`); } })()).length === 0);
+
+// ---------------------------------------------------------------------------
+console.log("\n== returns, exchanges & store credit");
+await as(OWNER, () => one(`select create_products($1, $2)`, [B, JSON.stringify([
+  { name: "Shirt M", unit: "pieces", cost_price: 40, selling_price: 100, opening_qty: 10 },
+  { name: "Shirt L", unit: "pieces", cost_price: 45, selling_price: 120, opening_qty: 10 },
+  { name: "Torch", unit: "pieces", cost_price: 20, selling_price: 35, opening_qty: 20 },
+  { name: "Itel A70", unit: "pieces", track_mode: "serial", cost_price: 900, selling_price: 1200, opening_qty: 2, serials: ["IT-0001", "IT-0002"] },
+  { name: "ORS sachet", unit: "sachets", track_mode: "batch", cost_price: 1, selling_price: 2, opening_qty: 30, batch_no: "ORS-1", expiry_date: "2027-05-01" },
+])]));
+const P4 = Object.fromEntries((await q(`select name, id from products where business_id = $1`, [B])).map((p) => [p.name, p.id]));
+const shirtM = P4["Shirt M"], shirtL = P4["Shirt L"], torch = P4["Torch"], itel = P4["Itel A70"], ors = P4["ORS sachet"];
+const stockOf = async (pid) => num((await one(`select coalesce(sum(quantity), 0) q from stock_levels where product_id = $1`, [pid])).q);
+const itemOf = async (saleId, pid) => (await one(`select id from sale_items where sale_id = $1 and product_id = $2`, [saleId, pid])).id;
+const ret = (uid, payload) => as(uid, () => rpc("process_return", payload));
+let refN = 0;
+const cref = () => `33333333-3333-3333-3333-${String(++refN).padStart(12, "0")}`;
+const till = async () => (await as(CASHIER, () => one(`select cash_up_expected($1, 0) r`, [B]))).r;
+
+await expectError("cashier cannot set a manager PIN", () => as(CASHIER, () => q(`select set_manager_pin($1, '4826')`, [B])), /permission/);
+await expectError("easy PINs are refused", () => as(OWNER, () => q(`select set_manager_pin($1, '1234')`, [B])), /too easy/);
+await expectError("PIN must be 4 digits", () => as(OWNER, () => q(`select set_manager_pin($1, '12a4')`, [B])), /4 digits/);
+await as(OWNER, () => q(`select set_manager_pin($1, '4826')`, [B]));
+check("PIN stored as a bcrypt hash", (await one(`select pin_hash from manager_pins where business_id = $1 and user_id = $2`, [B, OWNER])).pin_hash.startsWith("$2a$"));
+await expectError("nobody can read PIN hashes through the API", () => as(OWNER, () => q(`select * from manager_pins`)), /permission denied/);
+const pinStatus = (await as(CASHIER, () => one(`select manager_pin_status($1) r`, [B]))).r;
+check("staff see which managers can approve", pinStatus.managers.some((m) => m.user_id === OWNER && m.has_pin) && pinStatus.my_pin_set_at === null, pinStatus);
+
+// Cashier sells 3 shirts + 2 torches (370) with Le 10 off the sale.
+const rs1 = await as(CASHIER, () => rpc("record_sale", { business_id: B, discount: 10, items: [{ product_id: shirtM, qty: 3 }, { product_id: torch, qty: 2 }], payments: [{ method: "cash", amount: 360 }] }));
+const rs1Shirt = await itemOf(rs1.sale_id, shirtM), rs1Torch = await itemOf(rs1.sale_id, torch);
+check("till expects the sale's cash", num((await till()).expected_cash) === 360);
+const info = (await as(CASHIER, () => one(`select sale_return_info($1) r`, [rs1.sale_id]))).r;
+check("return info lists what can come back", info.items.length === 2 && num(info.sale.net_lines) === 370 && info.managers.length === 1, info);
+await expectError("staff cannot open returns on someone else's sale", () => as(STORE, () => one(`select sale_return_info($1)`, [rs1.sale_id])), /sales you recorded/);
+
+const refund = { sale_id: rs1.sale_id, return_type: "refund", reason_code: "changed_mind", reason: "Customer changed mind", refund_method: "cash", manager_id: OWNER };
+const wrong = await ret(CASHIER, { ...refund, client_ref: cref(), pin: "0000", items: [{ sale_item_id: rs1Shirt, qty: 1, restock: true }] });
+check("wrong PIN is refused and nothing changes", wrong.ok === false && wrong.error === "wrong_pin" && (await stockOf(shirtM)) === 7, wrong);
+check("wrong PIN attempt is logged", (await one(`select count(*)::int c from pin_failures where business_id = $1`, [B])).c === 1);
+await expectError("storekeeper cannot return the cashier's sale", () => ret(STORE, { ...refund, client_ref: cref(), pin: "4826", items: [{ sale_item_id: rs1Shirt, qty: 1, restock: true }] }), /sales you recorded/);
+
+const ref1 = cref();
+const rt1 = await ret(CASHIER, { ...refund, client_ref: ref1, pin: "4826", items: [{ sale_item_id: rs1Shirt, qty: 1, restock: true }] });
+// One of three shirts: 300 of the 370 in lines, less its share of the Le 10 → 300 × 360 / 370 / 3 = 97.30
+check("partial refund is worth what was paid after discounts", rt1.ok && num(rt1.total) === 97.3 && num(rt1.refund_paid) === 97.3 && rt1.refund_method === "cash", rt1);
+check("sellable goods go back on the shelf", (await stockOf(shirtM)) === 8);
+const rj = await one(`select sum(l.debit) d, sum(l.credit) c from journal_lines l join journal_entries e on e.id = l.entry_id where e.source_table = 'returns' and e.source_id = $1`, [rt1.return_id]);
+check("return journal balances (97.30 refund + 40 stock back)", num(rj.d) === 137.3 && num(rj.c) === 137.3, rj);
+check("cash refund comes out of the cashier's till", Math.abs(num((await till()).expected_cash) - (360 - 97.3)) < 0.001);
+check("the original sale is untouched", (await one(`select status, total from sales where id = $1`, [rs1.sale_id])).status === "completed");
+const dupRet = await ret(CASHIER, { ...refund, client_ref: ref1, pin: "4826", items: [{ sale_item_id: rs1Shirt, qty: 1, restock: true }] });
+check("a return sent twice is stored once", dupRet.duplicate === true && dupRet.return_id === rt1.return_id && (await stockOf(shirtM)) === 8, dupRet);
+await expectError("cannot return more than was sold", () => ret(CASHIER, { ...refund, client_ref: cref(), pin: "4826", items: [{ sale_item_id: rs1Shirt, qty: 3, restock: true }] }), /Only 2 of Shirt M/);
+
+const rt2 = await ret(CASHIER, { sale_id: rs1.sale_id, client_ref: cref(), return_type: "damaged", reason_code: "defective", reason: "Defective / damaged: does not switch on", refund_method: "cash", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: rs1Torch, qty: 1, restock: true }] });
+// One of two torches: 70 × 360 / 370 / 2 = 34.05. Damaged goods are written off even if restock was asked for.
+check("damaged return refunds and writes the goods off", rt2.ok && num(rt2.total) === 34.05 && num(rt2.qty_written_off) === 1 && (await stockOf(torch)) === 18, rt2);
+const mv = await q(`select reason, qty from stock_movements where ref_table = 'returns' and ref_id = $1 order by id`, [rt2.return_id]);
+check("damaged goods pass through the stock ledger", mv.length === 2 && mv[0].reason === "return_in" && mv[1].reason === "damage", mv);
+
+const rt3 = await ret(CASHIER, { ...refund, client_ref: cref(), pin: "4826", items: [{ sale_item_id: rs1Shirt, qty: 2, restock: true }, { sale_item_id: rs1Torch, qty: 1, restock: true }] });
+check("the last return settles the sale to the cent (360 − 97.30 − 34.05)", rt3.ok && num(rt3.total) === 228.65, rt3);
+check("refunds add up to exactly what was paid", num((await one(`select sum(total_refund_amount) t from returns where original_sale_id = $1`, [rs1.sale_id])).t) === 360);
+check("item refunds add up to the return", num((await one(`select sum(refund_amount) t from return_items where return_id = $1`, [rt3.return_id])).t) === 228.65);
+await expectError("nothing left to return", () => ret(CASHIER, { ...refund, client_ref: cref(), pin: "4826", items: [{ sale_item_id: rs1Torch, qty: 1, restock: true }] }), /Only 0 of Torch/);
+await expectError("a sale with returns cannot be voided", () => as(OWNER, () => one(`select request_sale_void($1, 'test')`, [rs1.sale_id])), /already been returned/);
+await expectError("returns cannot be edited", () => q(`update returns set total_refund_amount = 1 where id = $1`, [rt1.return_id]), /cannot be changed/);
+await expectError("returns cannot be written directly", () => as(CASHIER, () => q(`insert into returns (business_id, return_no, original_sale_id, location_id, return_type, reason_code, reason, total_refund_amount, approved_by) values ($1, 99, $2, $3, 'refund', 'other', 'xxx', 1, $4)`, [B, rs1.sale_id, loc["Shop shelves"].id, OWNER])), /permission denied/);
+
+console.log("\n== exchanges, store credit, credit sales");
+const isata = (await as(CASHIER, () => one(`insert into customers (business_id, name, phone) values ($1, 'Isata Conteh', '+23279000004') returning id`, [B]))).id;
+const isataNow = async () => one(`select balance, store_credit from customers where id = $1`, [isata]);
+const rs2 = await as(CASHIER, () => rpc("record_sale", { business_id: B, customer_id: isata, items: [{ product_id: shirtM, qty: 1 }], payments: [{ method: "cash", amount: 100 }] }));
+const ex = await ret(CASHIER, { sale_id: rs2.sale_id, client_ref: cref(), return_type: "exchange", reason_code: "wrong_item", reason: "Wrong item / size", manager_id: OWNER, pin: "4826",
+  items: [{ sale_item_id: await itemOf(rs2.sale_id, shirtM), qty: 1, restock: true }],
+  exchange: { items: [{ product_id: shirtL, qty: 1 }], payments: [{ method: "cash", amount: 20 }] } });
+check("exchange: size M back, size L out, customer adds Le 20", ex.ok && num(ex.exchange_amount) === 100 && num(ex.exchange_total) === 120 && num(ex.refund_paid) === 0 && ex.refund_method === null, ex);
+const exPays = await q(`select method, amount_base from sale_payments where sale_id = $1`, [ex.exchange_sale_id]);
+check("exchange sale is paid with the returned goods plus cash", exPays.length === 2 && exPays.some((p) => p.method === "store_credit" && num(p.amount_base) === 100), exPays);
+check("exchange moves both items", (await stockOf(shirtM)) === 10 && (await stockOf(shirtL)) === 9);
+check("an even exchange leaves no store credit owing", num((await as(OWNER, () => one(`select balance from account_balances($1) where system_key = 'store_credit'`, [B]))).balance) === 0);
+await expectError("the exchange sale cannot be voided", () => as(OWNER, () => one(`select request_sale_void($1, 'test')`, [ex.exchange_sale_id])), /exchange for return/);
+const rs3 = await as(CASHIER, () => rpc("record_sale", { business_id: B, customer_id: isata, items: [{ product_id: torch, qty: 2 }], payments: [{ method: "cash", amount: 70 }] }));
+await expectError("an exchange needs replacement items", async () => ret(CASHIER, { sale_id: rs3.sale_id, client_ref: cref(), return_type: "exchange", reason_code: "wrong_item", reason: "Wrong item", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: await itemOf(rs3.sale_id, torch), qty: 1, restock: true }] }), /taking in exchange/);
+// Torches: 20 − 2 sold + 1 damaged in/out + 1 back − 2 sold = 17
+check("a refused exchange leaves the stock alone", (await stockOf(torch)) === 17);
+const toCredit = await ret(CASHIER, { sale_id: rs3.sale_id, client_ref: cref(), return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", refund_method: "store_credit", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: await itemOf(rs3.sale_id, torch), qty: 2, restock: true }] });
+check("refund kept as store credit", toCredit.ok && num((await isataNow()).store_credit) === 70, toCredit);
+await expectError("store credit cannot be overspent", () => as(CASHIER, () => rpc("record_sale", { business_id: B, customer_id: isata, items: [{ product_id: shirtL, qty: 1 }], payments: [{ method: "store_credit", amount: 120 }] })), /only Le 70.00 of store credit/);
+await expectError("walk-ins have no store credit to spend", () => as(CASHIER, () => rpc("record_sale", { business_id: B, items: [{ product_id: torch, qty: 2 }], payments: [{ method: "store_credit", amount: 70 }] })), /customer whose store credit/);
+await as(CASHIER, () => rpc("record_sale", { business_id: B, customer_id: isata, items: [{ product_id: shirtL, qty: 1 }], payments: [{ method: "store_credit", amount: 70 }, { method: "cash", amount: 50 }] }));
+check("store credit spent at the till", num((await isataNow()).store_credit) === 0);
+
+const rs4 = await as(CASHIER, () => rpc("record_sale", { business_id: B, items: [{ product_id: torch, qty: 1 }], payments: [{ method: "cash", amount: 35 }] }));
+const rs4Torch = await itemOf(rs4.sale_id, torch);
+const walkIn = { sale_id: rs4.sale_id, return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: rs4Torch, qty: 1, restock: true }] };
+await expectError("store credit needs a named customer", () => ret(CASHIER, { ...walkIn, client_ref: cref(), refund_method: "store_credit" }), /named customer/);
+await expectError("refunds need a way to pay back", () => ret(CASHIER, { ...walkIn, client_ref: cref() }), /Choose how the customer gets/);
+await expectError("QMoney refunds need QMoney switched on", () => ret(CASHIER, { ...walkIn, client_ref: cref(), refund_method: "mobile_money", momo_provider: "qmoney" }), /not switched on/);
+const momo = await ret(CASHIER, { ...walkIn, client_ref: cref(), refund_method: "mobile_money", momo_provider: "orange_money" });
+check("Orange Money refund", momo.ok && momo.momo_provider === "orange_money" && num(momo.refund_paid) === 35, momo);
+check("mobile money refund shows against the cashier's Orange Money", num((await till()).momo_expected.orange_money) === -35, (await till()).momo_expected);
+
+const rs5 = await as(CASHIER, () => rpc("record_sale", { business_id: B, customer_id: isata, items: [{ product_id: torch, qty: 2 }], payments: [{ method: "credit", amount: 70 }] }));
+check("credit sale owed", num((await isataNow()).balance) === 70);
+const cr = await ret(CASHIER, { sale_id: rs5.sale_id, client_ref: cref(), return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", refund_method: "cash", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: await itemOf(rs5.sale_id, torch), qty: 1, restock: true }] });
+check("goods bought on credit come off the debt, not out of the till", cr.ok && num(cr.applied_to_balance) === 35 && num(cr.refund_paid) === 0 && cr.refund_method === null && num((await isataNow()).balance) === 35, cr);
+
+console.log("\n== returns of serial and batch items");
+const unit1 = (await one(`select id from serial_units where serial = 'IT-0001'`)).id;
+const rs6 = await as(CASHIER, () => rpc("record_sale", { business_id: B, items: [{ product_id: itel, qty: 1, serial_ids: [unit1] }], payments: [{ method: "cash", amount: 1200 }] }));
+const rs6Item = await itemOf(rs6.sale_id, itel);
+const phone = { sale_id: rs6.sale_id, return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", refund_method: "cash", manager_id: OWNER, pin: "4826" };
+await expectError("a serialised return names the IMEI", () => ret(CASHIER, { ...phone, client_ref: cref(), items: [{ sale_item_id: rs6Item, qty: 1, restock: true }] }), /serial number/);
+const sr = await ret(CASHIER, { ...phone, client_ref: cref(), items: [{ sale_item_id: rs6Item, qty: 1, restock: true, serial_ids: [unit1] }] });
+const unit = await one(`select status, sale_id, warranty_until from serial_units where id = $1`, [unit1]);
+check("returned phone is back in stock by IMEI", sr.ok && unit.status === "in_stock" && unit.sale_id === null && unit.warranty_until === null, unit);
+const rs7 = await as(CASHIER, () => rpc("record_sale", { business_id: B, items: [{ product_id: ors, qty: 5 }], payments: [{ method: "cash", amount: 10 }] }));
+await ret(CASHIER, { sale_id: rs7.sale_id, client_ref: cref(), return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", refund_method: "cash", manager_id: OWNER, pin: "4826", items: [{ sale_item_id: await itemOf(rs7.sale_id, ors), qty: 2, restock: true }] });
+check("restocked batch goods go back into their batch", num((await one(`select quantity from stock_batches where product_id = $1`, [ors])).quantity) === 27);
+check("many returns by one person raise an alert", (await one(`select count(*)::int c from alerts where business_id = $1 and kind = 'return_pattern'`, [B])).c === 1);
+
+console.log("\n== manager PIN lock-out");
+const rs8 = await as(CASHIER, () => rpc("record_sale", { business_id: B, items: [{ product_id: torch, qty: 1 }], payments: [{ method: "cash", amount: 35 }] }));
+const guess = { sale_id: rs8.sale_id, return_type: "refund", reason_code: "changed_mind", reason: "Changed mind", refund_method: "cash", manager_id: OWNER, items: [{ sale_item_id: await itemOf(rs8.sale_id, torch), qty: 1, restock: true }] };
+while ((await one(`select count(*)::int c from pin_failures where business_id = $1`, [B])).c < 5) {
+  await ret(CASHIER, { ...guess, client_ref: cref(), pin: "9999" });
+}
+check("repeated wrong PINs raise a critical alert", (await one(`select severity from alerts where business_id = $1 and kind = 'pin_failures'`, [B]))?.severity === "critical");
+await expectError("five wrong PINs lock the PIN, even the right one", () => ret(CASHIER, { ...guess, client_ref: cref(), pin: "4826" }), /Too many wrong PINs/);
+await as(OWNER, () => q(`select set_manager_pin($1, '5937')`, [B]));
+check("a new PIN unlocks returns", (await ret(CASHIER, { ...guess, client_ref: cref(), pin: "5937" })).ok === true);
+
+console.log("\n== books after returns");
+check("staff see the returns they took; others see none",
+  (await as(CASHIER, () => q(`select id from returns`))).length >= 10 && (await as(STORE, () => q(`select id from returns`))).length === 0);
+const tb2 = await one(`select sum(debit) d, sum(credit) c from journal_lines where business_id = $1`, [B]);
+check("trial balance still balances", num(tb2.d) === num(tb2.c), tb2);
+const inv2 = await as(OWNER, () => one(`select balance from account_balances($1) where system_key = 'inventory'`, [B]));
+const stock2 = await one(`select coalesce(sum(m.qty * m.unit_cost), 0) v from stock_movements m where m.business_id = $1`, [B]);
+check("inventory account still equals the stock ledger at cost", Math.abs(num(inv2.balance) - num(stock2.v)) < 0.05, { ledger: inv2.balance, stock: stock2.v });
+const scAcc = await as(OWNER, () => one(`select balance from account_balances($1) where system_key = 'store_credit'`, [B]));
+const scCust = await one(`select coalesce(sum(store_credit), 0) v from customers where business_id = $1`, [B]);
+check("store credit account equals what customers hold", num(scAcc.balance) === num(scCust.v), { account: scAcc.balance, customers: scCust.v });
+const pl2 = (await as(OWNER, () => one(`select profit_and_loss($1, current_date - 7, current_date) r`, [B]))).r;
+check("P&L shows sales returns against revenue", pl2.revenue_lines.some((l) => l.name === "Sales returns" && num(l.amount) < 0), pl2.revenue_lines);
+const dash2 = (await as(OWNER, () => one(`select dashboard_summary($1) r`, [B]))).r;
+check("dashboard shows today's sales net of returns", dash2.today.returns.count >= 10 && num(dash2.today.returns.total) > 0, dash2.today);
+const B2 = await as(OUTSIDER, () => rpc("create_business", { name: "Kroo Bay Boutique", business_type: "boutique", location_city: "Freetown" }));
+check("new businesses get the store credit and sales returns accounts",
+  (await one(`select count(*)::int c from accounts where business_id = $1 and system_key in ('store_credit', 'sales_returns')`, [B2])).c === 2);
 
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);

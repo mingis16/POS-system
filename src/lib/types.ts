@@ -2,7 +2,11 @@
 
 export type Role = "owner" | "admin" | "cashier" | "storekeeper";
 export type MemberStatus = "active" | "pending" | "suspended";
-export type PaymentMethod = "cash" | "orange_money" | "afrimoney" | "qmoney" | "bank" | "credit";
+/** store_credit is never switched on in settings: it spends credit a customer got from a return. */
+export type PaymentMethod = "cash" | "orange_money" | "afrimoney" | "qmoney" | "bank" | "credit" | "store_credit";
+/** The methods a business can switch on in settings. */
+export type BusinessPaymentMethod = Exclude<PaymentMethod, "store_credit">;
+export type MobileMoneyProvider = "orange_money" | "afrimoney" | "qmoney";
 export type Currency = "SLE" | "USD";
 export type ProductKind = "stock" | "service" | "raw_material";
 export type TrackMode = "none" | "serial" | "batch";
@@ -66,7 +70,7 @@ export interface Business {
   modules: BusinessModules;
   storage_modes: StorageMode[];
   sales_input_by: SalesInputBy;
-  payment_methods: PaymentMethod[];
+  payment_methods: BusinessPaymentMethod[];
   max_staff_discount_pct: number;
   stock_variance_tolerance_pct: number;
   cash_variance_tolerance: number;
@@ -150,6 +154,7 @@ export interface Customer {
   notes: string | null;
   credit_limit: number;
   balance: number;
+  store_credit: number;
   is_active: boolean;
 }
 
@@ -212,6 +217,66 @@ export interface SalePayment {
   fx_rate: number;
   amount_base: number;
   reference: string | null;
+}
+
+export type SaleReturnType = "refund" | "exchange" | "damaged";
+export type RefundMethod = "cash" | "mobile_money" | "store_credit";
+export type ReturnReason = "changed_mind" | "defective" | "wrong_item" | "expired" | "other";
+
+export interface SaleReturn {
+  id: string;
+  return_no: number;
+  original_sale_id: string;
+  customer_id: string | null;
+  return_type: SaleReturnType;
+  reason_code: ReturnReason;
+  reason: string;
+  total_refund_amount: number;
+  applied_to_balance: number;
+  exchange_amount: number;
+  refund_paid: number;
+  refund_method: RefundMethod | null;
+  momo_provider: MobileMoneyProvider | null;
+  exchange_sale_id: string | null;
+  restocked_cost: number;
+  written_off_cost: number;
+  processed_by: string;
+  approved_by: string;
+  created_at: string;
+}
+
+export interface ReturnItem {
+  id: string;
+  return_id: string;
+  sale_item_id: string;
+  product_id: string;
+  name: string;
+  kind: ProductKind;
+  quantity_returned: number;
+  restock_to_inventory: boolean;
+  refund_amount: number;
+  serial_ids: string[] | null;
+}
+
+/** What process_return reports back: where the value of the returned goods went. */
+export interface ReturnResult {
+  ok: boolean;
+  duplicate?: boolean;
+  return_id: string;
+  return_no: number;
+  return_type: SaleReturnType;
+  total: number;
+  applied_to_balance: number;
+  exchange_amount: number;
+  refund_paid: number;
+  refund_method: RefundMethod | null;
+  momo_provider: MobileMoneyProvider | null;
+  customer: string | null;
+  exchange_sale_id: string | null;
+  exchange_receipt_no: number | null;
+  exchange_total: number | null;
+  qty_restocked: number;
+  qty_written_off: number;
 }
 
 export interface Alert {

@@ -1,4 +1,4 @@
-import type { PaymentMethod } from "./types";
+import type { BusinessPaymentMethod, PaymentMethod } from "./types";
 
 /** Sierra Leone keeps GMT all year, so business days are UTC days. */
 export const TIME_ZONE = "Africa/Freetown";
@@ -91,9 +91,10 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   qmoney: "QMoney",
   bank: "Bank / UBA transfer",
   credit: "Credit (owing)",
+  store_credit: "Store credit",
 };
 
-export const PAYMENT_METHODS: PaymentMethod[] = ["cash", "orange_money", "afrimoney", "qmoney", "bank", "credit"];
+export const PAYMENT_METHODS: BusinessPaymentMethod[] = ["cash", "orange_money", "afrimoney", "qmoney", "bank", "credit"];
 
 export function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

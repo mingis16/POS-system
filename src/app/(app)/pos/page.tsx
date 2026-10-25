@@ -11,7 +11,7 @@ export default async function PosPage() {
     loadCatalog(supabase, business.id),
     supabase
       .from("customers")
-      .select("id, name, phone, balance, credit_limit")
+      .select("id, name, phone, balance, credit_limit, store_credit")
       .eq("business_id", business.id)
       .eq("is_active", true)
       .order("name")
@@ -36,7 +36,12 @@ export default async function PosPage() {
       isAdmin={can.admin}
       cashierName={ctx.membership.display_name}
       catalog={catalog}
-      customers={(customers.data ?? []).map((c) => ({ ...c, balance: Number(c.balance), credit_limit: Number(c.credit_limit) }))}
+      customers={(customers.data ?? []).map((c) => ({
+        ...c,
+        balance: Number(c.balance),
+        credit_limit: Number(c.credit_limit),
+        store_credit: Number(c.store_credit),
+      }))}
       staff={(staff.data ?? []).map((s) => ({ id: s.user_id, name: s.display_name }))}
       locations={locations.data ?? []}
     />

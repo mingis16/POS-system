@@ -18,8 +18,19 @@ function describe(e: AuditEntry): string {
       .map((k) => `${titleCase(k)}: ${fmt(e.before?.[k])} → ${fmt(e.after?.[k])}`)
       .join("; ");
   }
-  const label = data.name ?? data.title ?? (data.receipt_no ? `#${data.receipt_no}` : data.expense_no ? `#${data.expense_no}` : data.count_no ? `#${data.count_no}` : "");
-  const amount = data.total ?? data.amount ?? data.total_cost ?? data.variance;
+  const label =
+    data.name ??
+    data.title ??
+    (data.receipt_no
+      ? `#${data.receipt_no}`
+      : data.return_no
+        ? `Return #${data.return_no}`
+        : data.expense_no
+          ? `#${data.expense_no}`
+          : data.count_no
+            ? `#${data.count_no}`
+            : "");
+  const amount = data.total ?? data.amount ?? data.total_cost ?? data.total_refund_amount ?? data.variance;
   return [label, amount !== undefined ? `Le ${Number(amount).toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""].filter(Boolean).join(" · ");
 }
 
@@ -75,7 +86,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         </select>
         <select name="entity" defaultValue={sp.entity ?? ""} className={`${selectClass} !w-auto !py-1.5`}>
           <option value="">All records</option>
-          {["sales", "expenses", "products", "stock_receipts", "stock_counts", "cash_ups", "customers", "suppliers", "memberships", "businesses", "jobs", "alerts"].map((e) => (
+          {["sales", "returns", "expenses", "products", "stock_receipts", "stock_counts", "cash_ups", "customers", "suppliers", "memberships", "businesses", "jobs", "alerts"].map((e) => (
             <option key={e} value={e}>
               {titleCase(e)}
             </option>

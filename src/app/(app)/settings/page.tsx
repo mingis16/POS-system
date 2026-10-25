@@ -1,21 +1,28 @@
 import { requireAdmin } from "@/lib/auth";
 import { CITIES, JOB_KIND_LABELS, getArchetype } from "@/lib/archetypes";
-import { PAYMENT_LABELS, PAYMENT_METHODS, formatOldLeones, titleCase } from "@/lib/format";
+import { PAYMENT_LABELS, PAYMENT_METHODS, formatDateTime, formatOldLeones, titleCase } from "@/lib/format";
 import { Card, PageHeader } from "@/components/ui/card";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Field } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { buttonSecondary, buttonSmall, inputClass, selectClass } from "@/components/ui/styles";
-import { addCategory, addLocation, saveBusiness, saveNotifications, saveTerminology, updateLocation } from "./actions";
+import { addCategory, addLocation, saveBusiness, saveManagerPin, saveNotifications, saveTerminology, updateLocation } from "./actions";
 
 export const metadata = { title: "Settings" };
 
+interface PinStatus {
+  my_pin_set_at: string | null;
+  managers: { user_id: string; name: string; role: string; has_pin: boolean }[];
+}
+
 export default async function SettingsPage() {
-  const { supabase, business, terms } = await requireAdmin();
-  const [{ data: locations }, { data: categories }] = await Promise.all([
+  const { supabase, business, terms, user } = await requireAdmin();
+  const [{ data: locations }, { data: categories }, { data: pinData }] = await Promise.all([
     supabase.from("locations").select("*").eq("business_id", business.id).order("sort_order"),
     supabase.from("categories").select("id, name").eq("business_id", business.id).order("name"),
+    supabase.rpc("manager_pin_status", { b: business.id }),
   ]);
+  const pins = (pinData ?? { my_pin_set_at: null, managers: [] }) as PinStatus;
   const m = business.modules ?? {};
   const archetype = getArchetype(business.business_type);
 
@@ -149,6 +156,44 @@ export default async function SettingsPage() {
             </select>
             <SubmitButton className={buttonSecondary}>Add</SubmitButton>
           </ActionForm>
+        </Card>
+
+        <Card
+          title="Manager PIN"
+          description="Every return, refund and exchange needs an owner's or admin's 4-digit PIN at the till. Each manager sets their own; it is stored encrypted and nobody can read it back."
+        >
+          <p className="mb-3 text-sm">
+            Your PIN:{" "}
+            {pins.my_pin_set_at ? (
+              <Badge tone="good">Set {formatDateTime(pins.my_pin_set_at)}</Badge>
+            ) : (
+              <Badge tone="warning">Not set — you cannot approve returns yet</Badge>
+            )}
+          </p>
+          <ActionForm action={saveManagerPin} className="grid gap-3 sm:grid-cols-2">
+            <Field label={pins.my_pin_set_at ? "New PIN" : "PIN"} hint="4 digits. Not 1234, 0000 and the like.">
+              <input name="pin" type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} autoComplete="new-password" required className={inputClass} />
+            </Field>
+            <Field label="Repeat PIN">
+              <input name="confirm" type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} autoComplete="new-password" required className={inputClass} />
+            </Field>
+            <div className="sm:col-span-2">
+              <SubmitButton className={buttonSecondary}>{pins.my_pin_set_at ? "Change PIN" : "Set PIN"}</SubmitButton>
+            </div>
+          </ActionForm>
+          {pins.managers.length > 1 && (
+            <ul className="mt-4 flex flex-col gap-1 border-t border-zinc-100 pt-3 text-sm dark:border-zinc-800">
+              {pins.managers
+                .filter((m) => m.user_id !== user.id)
+                .map((m) => (
+                  <li key={m.user_id} className="flex justify-between gap-2">
+                    <span>{m.name}</span>
+                    {m.has_pin ? <Badge tone="good">PIN set</Badge> : <Badge>No PIN</Badge>}
+                  </li>
+                ))}
+            </ul>
+          )}
+          <p className="mt-3 text-xs text-zinc-500">Five wrong PINs in 15 minutes lock that PIN for 15 minutes and alert you. Setting a new PIN unlocks it.</p>
         </Card>
 
         <Card title="Alerts by SMS / WhatsApp" description="Critical alerts (cash shortages, stock missing, repeated voids) and low stock go to this number.">

@@ -6,6 +6,7 @@ import { Card, EmptyState, PageHeader, TableWrap } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonSecondary, inputClass, numClass, selectClass, tableClass, tdClass, thClass } from "@/components/ui/styles";
 import { QueuedSalesPanel } from "@/components/pos/queued-sales";
+import { ReturnButton } from "@/components/sales/return-dialog";
 
 export const metadata = { title: "Sales" };
 
@@ -14,14 +15,14 @@ export default async function SalesPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; status?: string; by?: string }>;
 }) {
-  const { supabase, business, can, terms } = await requireMember();
+  const { supabase, business, can, terms, user } = await requireMember();
   const sp = await searchParams;
   const to = sp.to && isISODate(sp.to) ? sp.to : todayISO();
   const from = sp.from && isISODate(sp.from) ? sp.from : addDays(to, -6);
 
   let q = supabase
     .from("sales")
-    .select("id, receipt_no, total, discount, status, offline, created_at, created_by, order_type, table_label, customers(name), sale_payments(method, amount_base)")
+    .select("id, receipt_no, total, discount, status, offline, created_at, created_by, order_type, table_label, customers(name), sale_payments(method, amount_base), returns!returns_original_sale_id_fkey(total_refund_amount)")
     .eq("business_id", business.id)
     .gte("created_at", `${from}T00:00:00Z`)
     .lt("created_at", `${addDays(to, 1)}T00:00:00Z`)
@@ -35,13 +36,15 @@ export default async function SalesPage({
   ]);
   const who = new Map((members ?? []).map((m) => [m.user_id, m.display_name]));
   const live = (sales ?? []).filter((s) => s.status !== "voided");
-  const total = live.reduce((s, x) => s + Number(x.total), 0);
+  const returnedOf = (s: { returns: unknown }) =>
+    ((s.returns as { total_refund_amount: number }[] | null) ?? []).reduce((t, r) => t + Number(r.total_refund_amount), 0);
+  const total = live.reduce((s, x) => s + Number(x.total) - returnedOf(x), 0);
 
   return (
     <>
       <PageHeader
         title={terms.sales}
-        description={`${live.length} ${terms.sales.toLowerCase()} · ${formatMoney(total)}${can.admin ? "" : " (yours)"}`}
+        description={`${live.length} ${terms.sales.toLowerCase()} · ${formatMoney(total)} after returns${can.admin ? "" : " (yours)"}`}
       />
       <QueuedSalesPanel />
       <Card bodyClassName="p-0 sm:p-0">
@@ -87,11 +90,17 @@ export default async function SalesPage({
                     <th className={`${thClass} ${numClass}`}>Total</th>
                     <th className={thClass}>Staff</th>
                     <th className={thClass}>Status</th>
+                    <th className={thClass}>
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {sales.map((s) => {
                     const pays = (s.sale_payments as unknown as { method: string }[]) ?? [];
+                    const returned = returnedOf(s);
+                    const hasReturns = ((s.returns as unknown[] | null) ?? []).length > 0;
+                    const fullyReturned = hasReturns && returned >= Number(s.total);
                     return (
                       <tr key={s.id} className={s.status === "voided" ? "opacity-50" : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"}>
                         <td className={tdClass}>
@@ -112,11 +121,30 @@ export default async function SalesPage({
                         <td className={tdClass}>{who.get(s.created_by) ?? "—"}</td>
                         <td className={tdClass}>
                           {s.status === "completed" ? (
-                            <Badge tone="good">OK</Badge>
+                            fullyReturned ? (
+                              <Badge tone="info">Returned</Badge>
+                            ) : hasReturns ? (
+                              <Badge tone="info">Part returned · −{formatMoney(returned)}</Badge>
+                            ) : (
+                              <Badge tone="good">OK</Badge>
+                            )
                           ) : s.status === "void_requested" ? (
                             <Badge tone="warning">Void requested</Badge>
                           ) : (
                             <Badge tone="neutral">Voided</Badge>
+                          )}
+                        </td>
+                        <td className={`${tdClass} text-right`}>
+                          {s.status === "completed" && !fullyReturned && (
+                            <ReturnButton
+                              saleId={s.id}
+                              receiptNo={s.receipt_no}
+                              terms={terms}
+                              userId={user.id}
+                              canExchange={can.sell}
+                              serialLabel={business.modules?.serialLabel}
+                              compact
+                            />
                           )}
                         </td>
                       </tr>

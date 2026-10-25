@@ -24,7 +24,8 @@ import type { AlertSeverity } from "@/lib/types";
 export const metadata = { title: "Dashboard" };
 
 interface AdminSummary {
-  today: { sales_count: number; revenue: number; gross_profit: number };
+  /** revenue and gross_profit are net of today's returns. */
+  today: { sales_count: number; revenue: number; gross_profit: number; returns?: { count: number; total: number } };
   today_expenses: number;
   week: { revenue: number; sales_count: number };
   last_week_to_date: number;
@@ -168,7 +169,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label={`${terms.sales} today`} value={formatMoney(s.today?.revenue, { short: true })} detail={`${s.today?.sales_count ?? 0} receipts`} icon={Receipt} />
+        <StatTile
+          label={`${terms.sales} today`}
+          value={formatMoney(s.today?.revenue, { short: true })}
+          detail={
+            s.today?.returns?.count
+              ? `${s.today.sales_count} receipts · ${formatMoney(s.today.returns.total, { short: true })} returned`
+              : `${s.today?.sales_count ?? 0} receipts`
+          }
+          icon={Receipt}
+        />
         <StatTile label="Gross profit today" value={formatMoney(s.today?.gross_profit, { short: true })} detail="Sales minus cost of goods" icon={TrendingUp} />
         <StatTile label="Expenses today" value={formatMoney(s.today_expenses, { short: true })} icon={Wallet} />
         <StatTile

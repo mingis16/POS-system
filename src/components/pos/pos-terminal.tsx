@@ -24,6 +24,7 @@ import { cacheCatalog, enqueueSale } from "@/lib/offline/queue";
 import { uuid } from "@/lib/uuid";
 import type { SalePayload } from "@/lib/validation";
 import { buttonPrimary, buttonSecondary, inputClass, selectClass } from "@/components/ui/styles";
+import { Modal } from "@/components/ui/modal";
 import { CameraScanner, cameraScanSupported } from "./scanner";
 import { Receipt, type ReceiptData } from "./receipt";
 import { quickAddCustomer } from "@/app/(app)/customers/actions";
@@ -44,6 +45,7 @@ interface PosCustomer {
   phone: string | null;
   balance: number;
   credit_limit: number;
+  store_credit: number;
 }
 interface Line {
   key: string;
@@ -227,7 +229,12 @@ export function PosTerminal(props: {
   const discountLimit = round2((subtotal * business.max_staff_discount_pct) / 100);
   const discountTooBig = !isAdmin && discountTotal > discountLimit + 0.001;
   const needsRx = cart.some((l) => l.item.requires_prescription);
-  const methods: PaymentMethod[] = ["cash", ...business.payment_methods.filter((m) => m !== "cash")];
+  const customer = customers.find((c) => c.id === customerId) ?? null;
+  const methods: PaymentMethod[] = [
+    "cash",
+    ...business.payment_methods.filter((m) => m !== "cash" && m !== "store_credit"),
+    ...(customer && customer.store_credit > 0 ? (["store_credit"] as const) : []),
+  ];
 
   const base = (p: PayRow) => (p.currency === "USD" ? round2(num(p.amount) * business.usd_rate) : round2(num(p.amount)));
   const paid = round2(payments.reduce((s, p) => s + base(p), 0));
@@ -237,7 +244,7 @@ export function PosTerminal(props: {
   const needsCustomer = payments.some((p) => p.method === "credit" && num(p.amount) > 0);
   const cashRow = payments.find((p) => p.method === "cash" && p.currency === "SLE");
   const change = cashRow && num(cashGiven) > 0 ? round2(num(cashGiven) - num(cashRow.amount)) : 0;
-  const customer = customers.find((c) => c.id === customerId) ?? null;
+  const storeCreditUsed = round2(payments.filter((p) => p.method === "store_credit").reduce((s, p) => s + num(p.amount), 0));
 
   function openCheckout() {
     setError(null);
@@ -250,6 +257,20 @@ export function PosTerminal(props: {
 
   function setPay(id: string, patch: Partial<PayRow>) {
     setPayments((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  function pickMethod(m: PaymentMethod) {
+    // Store credit can only cover what the customer holds; the rest stays on the other payment.
+    const cap = m === "store_credit" ? Math.min(customer?.store_credit ?? 0, total) : Infinity;
+    if (payments.length === 1 && num(payments[0].amount) === total) {
+      if (cap >= total) return setPay(payments[0].id, { method: m, currency: "SLE" });
+      return setPayments([
+        { id: uuid(), method: m, currency: "SLE", amount: cap.toFixed(2), reference: "" },
+        { ...payments[0], amount: round2(total - cap).toFixed(2) },
+      ]);
+    }
+    const amount = Math.max(0, Math.min(remaining, cap));
+    setPayments((rows) => [...rows, { id: uuid(), method: m, currency: "SLE", amount: amount.toFixed(2), reference: "" }]);
   }
 
   function fillRemaining(id: string) {
@@ -281,6 +302,10 @@ export function PosTerminal(props: {
     if (discountTooBig) return setError(`Discounts above ${business.max_staff_discount_pct}% need an admin.`);
     if (needsRx && !rxRef.trim()) return setError("Enter the prescription reference.");
     if (needsCustomer && !customerId) return setError("Choose the customer buying on credit.");
+    if (storeCreditUsed > 0 && !customer) return setError(`Choose the ${terms.customer.toLowerCase()} whose store credit is being used.`);
+    if (customer && storeCreditUsed > customer.store_credit + 0.001) {
+      return setError(`${customer.name} has only ${formatMoney(customer.store_credit)} of store credit.`);
+    }
     if (!balanced) return setError(`Payments must add up to ${formatMoney(total)}.`);
 
     const payload: SalePayload = {
@@ -324,10 +349,18 @@ export function PosTerminal(props: {
       }
       receiptNo = body.receipt_no ?? null;
     } catch {
+      // Store credit is checked against the live balance, so it cannot wait in the offline queue.
+      if (storeCreditUsed > 0) {
+        setBusy(false);
+        return setError("Store credit can only be spent while online. Take another payment, or try again when the connection is back.");
+      }
       enqueueSale(payload, total);
       offline = true;
     }
     setBusy(false);
+    if (storeCreditUsed > 0 && customer) {
+      setCustomers((list) => list.map((c) => (c.id === customer.id ? { ...c, store_credit: round2(c.store_credit - storeCreditUsed) } : c)));
+    }
 
     // Reflect the sale in the local stock figures straight away.
     const soldSerials = new Set(cart.flatMap((l) => l.serialIds));
@@ -521,6 +554,7 @@ export function PosTerminal(props: {
                 <option key={c.id} value={c.id}>
                   {c.name}
                   {c.balance > 0 ? ` (owes ${formatMoney(c.balance)})` : ""}
+                  {c.store_credit > 0 ? ` (credit ${formatMoney(c.store_credit)})` : ""}
                 </option>
               ))}
             </select>
@@ -717,11 +751,7 @@ export function PosTerminal(props: {
                 {methods.map((m) => (
                   <button
                     key={m}
-                    onClick={() =>
-                      payments.length === 1 && num(payments[0].amount) === total
-                        ? setPay(payments[0].id, { method: m, currency: "SLE" })
-                        : setPayments((rows) => [...rows, { id: uuid(), method: m, currency: "SLE", amount: Math.max(0, remaining).toFixed(2), reference: "" }])
-                    }
+                    onClick={() => pickMethod(m)}
                     className="rounded-full border border-zinc-300 px-3 py-1.5 text-sm hover:border-brand-600 dark:border-zinc-700"
                   >
                     {m === "credit" ? "Credit" : PAYMENT_LABELS[m]}
@@ -759,7 +789,7 @@ export function PosTerminal(props: {
                       )}
                     </div>
                     <div className="mt-2 flex items-center gap-2 text-xs">
-                      {p.method !== "cash" && p.method !== "credit" && (
+                      {p.method !== "cash" && p.method !== "credit" && p.method !== "store_credit" && (
                         <input value={p.reference} onChange={(e) => setPay(p.id, { reference: e.target.value })} placeholder="Transaction ID (optional)" className="flex-1 rounded-md border border-zinc-200 bg-transparent px-2 py-1 dark:border-zinc-700" />
                       )}
                       {p.currency === "USD" && <span className="text-zinc-500">= {formatMoney(base(p))} at {business.usd_rate}</span>}
@@ -791,6 +821,11 @@ export function PosTerminal(props: {
                 </p>
               )}
               {needsCustomer && !customerId && <p className="text-sm text-red-700">Choose the {terms.customer.toLowerCase()} in the cart for a credit sale.</p>}
+              {storeCreditUsed > 0 && customer && (
+                <p className="text-xs text-zinc-500">
+                  {customer.name} has {formatMoney(customer.store_credit)} of store credit from returns.
+                </p>
+              )}
               {needsCustomer && customer && customer.credit_limit > 0 && (
                 <p className="text-xs text-zinc-500">
                   {customer.name} owes {formatMoney(customer.balance)} of a {formatMoney(customer.credit_limit)} limit.
@@ -854,31 +889,6 @@ function CatChip({ on, onClick, children }: { on: boolean; onClick: () => void; 
     >
       {children}
     </button>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <>
-      <motion.div className="no-print fixed inset-0 z-40 bg-black/50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
-      <motion.div
-        role="dialog"
-        aria-label={title}
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] overflow-y-auto rounded-t-2xl bg-surface p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[440px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:pb-4"
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 40 }}
-        transition={{ type: "spring", stiffness: 420, damping: 36 }}
-      >
-        <div className="no-print mb-3 flex items-center justify-between">
-          <h2 className="font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Close">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        {children}
-      </motion.div>
-    </>
   );
 }
 

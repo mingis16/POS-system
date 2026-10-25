@@ -17,7 +17,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const { q, owing } = await searchParams;
   let query = supabase
     .from("customers")
-    .select("id, name, phone, notes, credit_limit, balance, is_active")
+    .select("id, name, phone, notes, credit_limit, balance, store_credit, is_active")
     .eq("business_id", business.id)
     .order("balance", { ascending: false })
     .order("name")
@@ -55,6 +55,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       <th className={thClass}>Phone</th>
                       <th className={`${thClass} ${numClass}`}>Owes</th>
                       <th className={`${thClass} ${numClass}`}>Limit</th>
+                      <th className={`${thClass} ${numClass}`}>Store credit</th>
                       <th className={thClass}>Receive payment</th>
                     </tr>
                   </thead>
@@ -83,6 +84,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                           {Number(c.balance) > 0 ? <Badge tone="warning">{formatMoney(c.balance)}</Badge> : formatMoney(0)}
                         </td>
                         <td className={`${tdClass} ${numClass}`}>{Number(c.credit_limit) > 0 ? formatMoney(c.credit_limit) : "—"}</td>
+                        <td className={`${tdClass} ${numClass}`}>
+                          {Number(c.store_credit) > 0 ? <Badge tone="info">{formatMoney(c.store_credit)}</Badge> : "—"}
+                        </td>
                         <td className={tdClass}>
                           {Number(c.balance) > 0 && (
                             <ActionForm action={receiveCustomerPayment} className="flex items-center gap-1.5">

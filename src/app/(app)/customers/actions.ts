@@ -16,7 +16,7 @@ export async function quickAddCustomer(name: string, phone: string): Promise<Act
       .select("id, name, phone, balance, credit_limit")
       .single();
     check(error);
-    return { message: "Customer added.", data: { ...data, balance: 0, credit_limit: 0 } };
+    return { message: "Customer added.", data: { ...data, balance: 0, credit_limit: 0, store_credit: 0 } };
   }, "/pos");
 }
 

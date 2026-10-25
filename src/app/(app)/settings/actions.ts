@@ -137,6 +137,18 @@ export async function saveNotifications(_: ActionState, form: FormData): Promise
   }, "/settings");
 }
 
+/** An owner or admin sets their own 4-digit PIN for approving returns. Stored as a bcrypt hash. */
+export async function saveManagerPin(_: ActionState, form: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const { supabase, business } = await authorize(ADMIN_ROLES);
+    const pin = z.string().regex(/^\d{4}$/, "The PIN must be exactly 4 digits.").parse(form.get("pin"));
+    if (form.get("confirm") !== pin) throw new ActionError("The two PINs do not match.");
+    const { error } = await supabase.rpc("set_manager_pin", { b: business.id, p_pin: pin });
+    check(error);
+    return "Manager PIN saved. Use it to approve returns and refunds.";
+  }, "/settings");
+}
+
 export async function addLocation(_: ActionState, form: FormData): Promise<ActionState> {
   return runAction(async () => {
     const { supabase, business } = await authorize(ADMIN_ROLES);

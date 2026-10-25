@@ -33,6 +33,8 @@ export const optionalAmount = (label: string) =>
   );
 
 export const PAYMENT_METHOD = z.enum(["cash", "orange_money", "afrimoney", "qmoney", "bank", "credit"]);
+/** How a sale can be paid: the methods a business switches on, plus store credit from returns. */
+export const SALE_PAYMENT_METHOD = z.enum([...PAYMENT_METHOD.options, "store_credit"]);
 export const MONEY_METHOD = z.enum(["cash", "orange_money", "afrimoney", "qmoney", "bank"]);
 export const STORAGE_MODE = z.enum(["shelves", "freezers", "cold_store", "warehouse"]);
 
@@ -178,7 +180,7 @@ export const saleSchema = z.object({
   payments: z
     .array(
       z.object({
-        method: PAYMENT_METHOD,
+        method: SALE_PAYMENT_METHOD,
         amount: z.number().positive(),
         currency: z.enum(["SLE", "USD"]).default("SLE"),
         reference: z.string().trim().max(60).optional(),
@@ -187,6 +189,54 @@ export const saleSchema = z.object({
     .max(6),
 });
 export type SalePayload = z.input<typeof saleSchema>;
+
+export const returnSchema = z.object({
+  client_ref: z.string().uuid(),
+  sale_id: z.string().uuid(),
+  return_type: z.enum(["refund", "exchange", "damaged"]),
+  reason_code: z.enum(["changed_mind", "defective", "wrong_item", "expired", "other"]),
+  reason: z.string().trim().min(3, "Say why the goods are coming back.").max(300),
+  refund_method: z.enum(["cash", "mobile_money", "store_credit"]).nullable().optional(),
+  momo_provider: z.enum(["orange_money", "afrimoney", "qmoney"]).nullable().optional(),
+  items: z
+    .array(
+      z.object({
+        sale_item_id: z.string().uuid(),
+        qty: z.number().positive(),
+        restock: z.boolean(),
+        serial_ids: z.array(z.string().uuid()).optional(),
+      }),
+    )
+    .min(1, "Choose at least one item to return.")
+    .max(200),
+  exchange: z
+    .object({
+      items: z
+        .array(
+          z.object({
+            product_id: z.string().uuid(),
+            qty: z.number().positive(),
+            serial_ids: z.array(z.string().uuid()).optional(),
+          }),
+        )
+        .min(1, "Choose what the customer is taking in exchange.")
+        .max(200),
+      payments: z
+        .array(
+          z.object({
+            method: SALE_PAYMENT_METHOD,
+            amount: z.number().positive(),
+            reference: z.string().trim().max(60).optional(),
+          }),
+        )
+        .max(4),
+      prescription_ref: z.string().trim().max(80).optional(),
+    })
+    .optional(),
+  manager_id: z.string().uuid("Choose the manager approving this."),
+  pin: z.string().regex(/^\d{4}$/, "Enter the 4-digit manager PIN."),
+});
+export type ReturnPayload = z.input<typeof returnSchema>;
 
 export const expenseSchema = z.object({
   account_id: z.string().uuid("Choose an expense category."),
